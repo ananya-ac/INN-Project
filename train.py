@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 from loader import get_GI_loaders
 import torch.nn.functional as F
 import numpy as np
-
+from scipy.stats import norm
 import pytorch_lightning as pl
 import torch
 import numpy as np
@@ -89,7 +89,6 @@ if __name__ == '__main__':
     if len(sys.argv) != 4:
         print("Usage: train.py <loss_function> <prior> <dataset>")
         sys.exit(1)
-    torch.autograd.set_detect_anomaly(True)
     loss_f = sys.argv[1]
     prior = sys.argv[2].lower() == 'true'
     dataset = sys.argv[3]
@@ -147,45 +146,64 @@ if __name__ == '__main__':
         y_clean = y_clean.repeat(config.num_samples,1)
         
         fig_name = f"{loss_f}_prior" if prior else loss_f 
-        axes, distance = arm.viz_inverse(pos = y_clean, thetas = gen_x, save = False, show = False, fig_name=fig_name)
-        csv_path = 'rmse_logs.csv'
+        axes, distance = arm.viz_inverse(pos = y_clean, thetas = gen_x, save = True, show = False, fig_name=fig_name)
+        # csv_path = 'rmse_logs.csv'
 
-        if not os.path.exists(csv_path):
-            # Create a new DataFrame with the column and add the value
-            df = pd.DataFrame({f"{loss_f}_{prior}": [distance]})
-            df.to_csv(csv_path, index=False)
-        else:
-            # Load the existing CSV and add the value to the column
-            df = pd.read_csv(csv_path)
-            column_name = f"{loss_f}_{prior}"
-            if column_name not in df.columns:
-                df[column_name] = None  # Add the column if it doesn't exist
-            df = pd.concat([df, pd.DataFrame({column_name: [distance]})], ignore_index=True)
-            df.to_csv(csv_path, index=False)
+        # if not os.path.exists(csv_path):
+        #     # Create a new DataFrame with the column and add the value
+        #     df = pd.DataFrame({f"{loss_f}_{prior}": [distance]})
+        #     df.to_csv(csv_path, index=False)
+        # else:
+        #     # Load the existing CSV and add the value to the column
+        #     df = pd.read_csv(csv_path)
+        #     column_name = f"{loss_f}_{prior}"
+        #     if column_name not in df.columns:
+        #         df[column_name] = None  # Add the column if it doesn't exist
+        #     df = pd.concat([df, pd.DataFrame({column_name: [distance]})], ignore_index=True)
+        #     df.to_csv(csv_path, index=False)
         # with open(f'RMSE_logs_{loss_f}_{prior}.txt', 'a') as file: 
         #     file.write(str(distance))
         #     file.write("\n")
             
         
     elif dataset.lower() == 'cubic':
-        y_clean = torch.tensor(-2.5**3, dtype = torch.float)
+        y_clean = torch.tensor(1.5**3, dtype=torch.float)
         c = config.Cubic_Config()
         model = model.to(config.device)
-        gen_x = [model(torch.cat([(y_clean + config.y_noise_scale * torch.randn_like(y_clean)).view(1,-1).to(config.device), config.y_noise_scale *  torch.randn(size = (1,c.ndim_z)).to(config.device)], dim = 1), rev = True)[0] for i in range(config.num_samples)]
+
+        # Generate samples
+        gen_x = [model(torch.cat([
+                    (y_clean + config.y_noise_scale * torch.randn_like(y_clean)).view(1, -1).to(config.device),
+                    config.y_noise_scale * torch.randn(size=(1, c.ndim_z)).to(config.device)
+                ], dim=1), rev=True)[0] for _ in range(config.num_samples)]
         gen_x = torch.stack(gen_x).squeeze(1)[:, :c.ndim_x]
-        gen_x = gen_x.to('cpu')
-        gen_x = gen_x.detach().numpy()
+        gen_x = gen_x.to('cpu').detach().numpy()
+
         print('mean of samples:', gen_x.mean())
+
+        # Plot
         plt.rcParams['font.family'] = 'DejaVu Serif'
         sns.set_theme(style="whitegrid", palette="muted")
         plt.figure(figsize=(10, 6))
-        sns.histplot(gen_x, bins=55,kde = True, color="skyblue", linewidth=2, stat="probability", alpha = 1, multiple='dodge', hatch='\\\\', label = 'No Prior' if not prior else 'Prior')
-        plt.xlabel("Value", fontsize=20, fontname = 'DejaVu Serif')
-        plt.ylabel("Density", fontsize=20, fontname = 'DejaVu Serif')
-        plt.legend(prop = 'DejaVu Serif')
+
+        sns.histplot(
+            gen_x, bins=55, kde=True, color="skyblue", linewidth=2,
+            stat="probability", alpha=1, multiple='dodge', hatch='\\\\',
+            label='No Prior' if not prior else 'Prior'
+        )
+
+        # Add dotted line at y_clean
+        plt.axvline(x=1.5, color='red', linestyle='dotted', linewidth=2, label='y_clean')
+
+        # Labeling and styling
+        plt.xlabel("Value", fontsize=20, fontname='DejaVu Serif')
+        plt.ylabel("Density", fontsize=20, fontname='DejaVu Serif')
+        plt.legend(prop={'family': 'DejaVu Serif'})
         sns.despine()
         plt.grid(True, linestyle=' ', color='gray', alpha=0.6)
         plt.show()
+        pdb.set_trace()
+
         
     elif dataset.lower() == 'gi':
         
@@ -197,10 +215,46 @@ if __name__ == '__main__':
         # posterior_samples = [posterior_samples[i].detach().cpu() for i in range(len(posterior_samples))]
         # torch.save(posterior_samples, f'posterior_samples_{prior}_{loss_f}.pt')
         print("Training completed for GI dataset.")
+        
+    elif dataset.lower() == 'toy_example':
+        
+        x_grid = np.linspace(-3, 3, 1000)
+        
+        prior_support = (x_grid >= 2) & (x_grid <= 3)
+
+        # Sample true x and generate y for both cases
+        x_true = np.random.uniform(2, 3)
+
+        # Gaussian noise
+        y_gauss = x_true + np.random.randn()
+
+        # Exponential noise
+        y_lap = x_true + np.random.laplace(loc=0.0, scale=1.0)
+
+        # Posterior for Gaussian noise
+        likelihood_gauss = norm.pdf(y_gauss, loc=x_grid, scale=1)
+        unnorm_post_gauss = likelihood_gauss * prior_support.astype(float)
+        posterior_gauss = unnorm_post_gauss / np.trapz(unnorm_post_gauss, x_grid)
+
+        # Posterior for Exponential noise
+        lambda_ = 1.0
+        likelihood_exp = np.where(x_grid <= y_lap, lambda_ * np.exp(-lambda_ * (y_lap - x_grid)), 0)
+        unnorm_post_exp = likelihood_exp * prior_support.astype(float)
+        posterior_exp = unnorm_post_exp / np.trapz(unnorm_post_exp, x_grid)
+        
+        c = config.Toy_Config()
+        y_lap = torch.tensor(y_lap, dtype = torch.float32, device=config.device).unsqueeze(dim = -1)
+        model = model.to(config.device)
+        #posterior_samples = [model(torch.cat([y_exp.unsqueeze(1), config.y_noise_scale * torch.randn(size = (1, c.ndim_z)) * model.x_std], dim=1).to(config.device), rev = True)[0] for _ in range(1000)]
+        
+        posterior_samples = [model.sample(y_lap) for _ in range(1000)]  
+        posterior_samples = torch.stack(posterior_samples).squeeze(1)[:, :c.ndim_x]
+        pdb.set_trace()
+        pass  
             
     
     else:
-        print("Invalid dataset. Please choose from 'ik_robotics', 'cubic', or 'gi'.")
+        print("Invalid dataset. Please choose from 'ik_robotics', 'cubic', 'gi' or 'toy_example'.")
         sys.exit(1)
     
         

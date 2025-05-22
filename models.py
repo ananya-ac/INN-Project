@@ -12,14 +12,22 @@ from loader import get_test
 from typing import Tuple
 import torch.utils.data as data
 from geomloss import SamplesLoss
+import numpy as np  
 import pdb
 
 approx_wasserstein = SamplesLoss(p = 2, blur = 0.01)
 
 
 def subnet_fc(c_in, c_out):
-    return nn.Sequential(nn.Linear(c_in, 512), nn.ReLU(),
-                         nn.Linear(512,  c_out))
+    net = nn.Sequential(
+        nn.Linear(c_in, 512),
+        nn.GELU(),
+        nn.Linear(512, 512),
+        nn.GELU(),
+        nn.Linear(512, c_out)
+    )
+
+    return net
 
 
 def distance_euclidean(pos_target: torch.FloatTensor, pos: torch.FloatTensor) -> float:
@@ -55,10 +63,18 @@ def get_inn(dim_tot):
     nodes.append(OutputNode(nodes[-1], name='output'))
     
     model =  ReversibleGraphNet(nodes, verbose=False)
-    trainable_parameters = [p for p in model.parameters() if p.requires_grad]
+    # trainable_parameters = [p for p in model.parameters() if p.requires_grad]
     
-    for param in trainable_parameters:
-        param.data = 0.05*torch.randn_like(param)
+    # for param in trainable_parameters:
+    #     param.data = 0.05*torch.randn_like(param)
+    
+    for param in model.parameters():
+        if param.requires_grad:
+            if param.dim() > 1:
+                nn.init.orthogonal_(param, gain=0.8)
+            else:
+                nn.init.constant_(param, 0.0)
+
     
     return model
 
@@ -109,6 +125,8 @@ class INNModel(pl.LightningModule):
             self.c = config.IK_Config
         if dataset == 'GI':
             self.c = config.GI_Config
+        if dataset == 'toy_example':
+            self.c = config.Toy_Config
         self.model = get_inn(self.c.ndim_tot)
         self.x_mean = None
         self.x_std = None
@@ -128,9 +146,22 @@ class INNModel(pl.LightningModule):
         
     def sample(self, y):
         
-        y[:,:self.c.ndim_y] = (y[:, :self.c.ndim_y] - self.y_mean)/self.y_std 
-        sample, _ = self.model(y, rev=True)
-        sample = sample * self.x_std + self.x_mean
+        
+        if self.y_mean is not None:
+            y = (y- self.y_mean) / self.y_std
+
+         # Add noise to match total input dimension
+        noise = config.y_noise_scale * torch.randn(y.shape[0], self.c.ndim_z, device=config.device)
+        #pdb.set_trace()
+        #y_full = torch.cat([y.unsqueeze(1), config.y_noise_scale * (2 * torch.rand(y.shape[0], self.c.ndim_z, device=config.device) - 1)], dim=1)
+
+        y_full = torch.cat([y.unsqueeze(1), noise], dim=1)
+
+        # Pass through inverse model
+        sample, _ = self.model(y_full, rev=True)
+        if self.x_mean is not None:
+            sample = sample * self.x_std + self.x_mean
+
         return sample
 
     def training_step(self, batch, batch_idx):
@@ -148,26 +179,24 @@ class INNModel(pl.LightningModule):
 
         y_clean = y.clone()
         
-        if self.dataset.lower() != 'gi':
-            y = y + config.y_noise_scale * torch.randn_like(y, dtype=torch.float, device=config.device)
+        # if not (self.dataset.lower() == 'gi' or self.dataset.lower() == 'toy_example'):
+        #     y = y + config.y_noise_scale * torch.randn_like(y, dtype=torch.float, device=config.device)
+            
         
         x = torch.cat([x, config.zeros_noise_scale * torch.randn(config.batch_size, self.c.ndim_tot - self.c.ndim_x, device=config.device)], dim=1)
         y = torch.cat([y, config.y_noise_scale * torch.randn(config.batch_size, self.c.ndim_z, device=config.device)], dim=1)
-        
+        #y = torch.cat([y, config.y_noise_scale * (2 * torch.rand(config.batch_size, self.c.ndim_z, device=config.device) - 1)], dim=1)
+
         output_rev, _ = self.model(y, rev=True)
         output, sum_log_j_f = self.model(x)
         
         y_act = y_clean[:, :self.c.ndim_y]
         y_preds = output[:, :self.c.ndim_y]
         z_preds = output[:, self.c.ndim_y:]
-        
         y_clean = torch.cat([y_clean, y[:, self.c.ndim_y:]], dim=1)
         
         if self.loss_f == 'NLL':
-            loss = (1/config.var) * fit_l2(y_preds, y_act)
-            self.log("train_loss_fit_l2", (1/config.var) * fit_l2(y_preds, y_act))
-            loss += NLL(z_preds, sum_log_j_f)
-            self.log("NLL", NLL(z_preds, sum_log_j_f))
+            loss = 25 * fit_l2(y_preds,y_act) + NLL(z_preds, sum_log_j_f) + 5 * fit_l2(output_rev[:,:self.c.ndim_x], x[:,:self.c.ndim_x])
             
             
         
@@ -177,6 +206,8 @@ class INNModel(pl.LightningModule):
             
         if self.loss_f == 'wasserstein':
             loss = fit_l2(y_preds, y_act)
+            self.log("train_loss_fit_l2", fit_l2(y_preds, y_act))
+            self.log("wasserstein", approx_wasserstein(y_clean, output))
             loss = loss + approx_wasserstein(y, output)
             
         
@@ -200,7 +231,7 @@ class INNModel(pl.LightningModule):
             if self.dataset == 'ik_robotics':
                 loss_backward += config.prior_scale * normal_prior_x_loss(x_gt=x[:, :self.c.ndim_x], x = output_rev[:, :self.c.ndim_x]) 
                 #loss_backward += config.prior_scale * uniform_prior_loss(output_rev[:, :self.c.ndim_x])
-            elif self.dataset == 'cubic' : loss_backward += uniform_prior_loss(output_rev[:, :self.c.ndim_x])
+            elif self.dataset == 'cubic' : loss_backward += 10 * uniform_prior_loss(output_rev[:, :self.c.ndim_x])
             
             
             else:
@@ -286,12 +317,12 @@ class INNModel(pl.LightningModule):
         trainable_parameters = [p for p in self.model.parameters() if p.requires_grad]
         optimizer = torch.optim.Adam(trainable_parameters, lr=config.lr, betas=config.betas, eps=config.eps, weight_decay=config.l2_reg)
         #scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=50, gamma=0.1)
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-                    optimizer, 
-                    T_max=50,  # Cycle length in epochs
-                    eta_min=1e-6  # Minimum learning rate
-                )
-        # #scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.95)
+        # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        #             optimizer, 
+        #             T_max=50,  # Cycle length in epochs
+        #             eta_min=1e-6  # Minimum learning rate
+        #         )
+        scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.95)
 
         
         return {
@@ -310,7 +341,19 @@ class INNModel(pl.LightningModule):
             
         elif self.dataset == 'ik_robotics':
             train_loader, _ = get_loaders()
-        
+            
+        elif self.dataset == 'toy_example':
+            x_train = np.random.uniform(2, 3, size=1000000)
+            y_train = x_train + np.random.laplace(size=1000000, loc=0, scale=1.0) 
+            dataset = data.TensorDataset(torch.tensor(x_train, dtype=torch.float32),
+                                         torch.tensor(y_train, dtype=torch.float32))
+            train_loader = data.DataLoader(dataset, batch_size=config.batch_size, shuffle=True, drop_last=True)
+            
+            # self.x_mean = torch.mean(torch.tensor(x_train, dtype=torch.float32)).to(config.device)
+            # self.x_std = torch.std(torch.tensor(x_train, dtype=torch.float32)).to(config.device)
+            # self.y_mean = torch.mean(torch.tensor(y_train, dtype=torch.float32)).to(config.device)
+            # self.y_std = torch.std(torch.tensor(y_train, dtype=torch.float32)).to(config.device)
+            
         else:
             train_loader, _, _, _ ,_,_= get_GI_loaders()
         

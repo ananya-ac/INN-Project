@@ -12,7 +12,7 @@ class RobotArm2d():
     """2D PRRR robot arm from ardizzone et al. (prismatic, rotational, rotational, rotational)
     Arm can have more or less rotational joints.
     """
-    def __init__(self, lengths: list = [0.5, 0.5, 1], sigmas: list = [0.25, 0.5, 0.5, 0.5], viz_dir: str = "figures"):
+    def __init__(self, lengths: list = [0.5, 0.5, 1], sigmas: list = [0.25, 0.5, 0.5, 0.5], viz_dir: str = "color_figures_0"):
         cuda = True if torch.cuda.is_available() else False
         Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
         if cuda:
@@ -24,8 +24,22 @@ class RobotArm2d():
         self.lengths = Tensor(lengths)
         self.rangex = (-self.lengths.sum().cpu()*0.5, self.lengths.sum().cpu()*1.2)  # (-0.35, 2.25)
         self.rangey = (-(self.lengths.sum().cpu() + self.sigmas[0].cpu()), (self.lengths.sum().cpu() + self.sigmas[0].cpu()))  # (-1.3, 1.3)
-        cmap = plt.cm.tab20c
-        self.colors = [[cmap(4*c_index + i) for i in range(self.lengths.shape[0])] for c_index in range(5)][-1]
+        #cmap = plt.cm.tab20c
+        #self.colors = [[cmap(4*c_index + i) for i in range(self.lengths.shape[0])] for c_index in range(5)][-1]
+        base_color = (1.0, 0.5, 0.0)  # orange
+        white = (1.0, 1.0, 1.0)
+
+        whiteness = 0.6  # try 0.6 to 0.8 for subtle fading
+
+        num_shades = self.lengths.shape[0]
+
+        self.colors = []
+        for i in range(num_shades):
+            interp = (i / (num_shades - 1)) * whiteness  # only blend up to `whiteness`
+            rgb = tuple((1 - interp) * o + interp * w for o, w in zip(base_color, white))
+            rgba = (*rgb, 0.8)  # optional: set alpha for translucency
+            self.colors.append(rgba)
+        
         self.out_dir = "data"
         self.viz_dir = viz_dir
         if not os.path.isdir(self.out_dir):
@@ -190,7 +204,11 @@ class RobotArm2d():
         ax.set_ylim(*self.rangey)
         ax.axvline(x=0, ls=':', c='gray', linewidth=.5)
         # Euclidean position is only calculated to the first entry of pos, while target crosses for all will be displayed
-        ax.set_title(f"Inverse Kinematics with {thetas.shape[0]} samples, mean euc. distance = {distance:.3f}")
+        #ax.set_title(f"Inverse Kinematics with {thetas.shape[0]} samples, mean euc. distance = {distance:.3f}")
+        ax.set_xlabel("X Position", fontsize = 14)
+        ax.set_ylabel("Y Position", fontsize = 14)
+        ax.tick_params(axis='both', labelsize = 13)  # Increase tick font size
+
         
         # If ax were passed we can only save the subplot and not the individual plots
         if save and not passed_ax:

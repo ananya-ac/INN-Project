@@ -8,3 +8,5 @@ matplotlib==3.9.2
 pykeops==2.2.3
 pytorch-lightning==2.5.0.post0
 lightning==2.5.0.post0
+pandas==2.2.3
+seaborn==0.13.2

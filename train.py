@@ -137,16 +137,37 @@ if __name__ == '__main__':
         arm = RobotArm2d(lengths = c.lengths, sigmas = c.sigmas)
         model = model.to(config.device)
         y_clean = get_test()
-        y_test = y_clean
-        #generated_x = [model(torch.cat([(y_test.unsqueeze(0)).to(config.device),  config.y_noise_scale * torch.randn(size = (1, c.ndim_tot - c.ndim_y)).to(config.device)], dim = 1), rev = True)[0] for i in range(config.num_samples)]
-        generated_x = [model(torch.cat([(y_test.unsqueeze(0)).to(config.device) + config.y_noise_scale * torch.randn(1, c.ndim_y).to(config.device),  config.y_noise_scale * torch.randn(size = (1, c.ndim_tot - c.ndim_y)).to(config.device)], dim = 1), rev = True)[0] for i in range(config.num_samples)]
-        gen_x = torch.stack(generated_x).squeeze(1)[:, :c.ndim_x]
-        gen_x = gen_x.to('cpu')
-        gen_x = gen_x.detach()
-        y_clean = y_clean.repeat(config.num_samples,1)
+        # y_test = y_clean
+        # generated_x = [model(torch.cat([(y_test.unsqueeze(0)).to(config.device) + config.y_noise_scale * torch.randn(1, c.ndim_y).to(config.device),  config.y_noise_scale * torch.randn(size = (1, c.ndim_tot - c.ndim_y)).to(config.device)], dim = 1), rev = True)[0] for i in range(config.num_samples)]
+        # #generated_x = [model(torch.cat([(y_test.unsqueeze(0)).to(config.device),  config.y_noise_scale * torch.randn(size = (1, c.ndim_tot - c.ndim_y)).to(config.device)], dim = 1), rev = True)[0] for i in range(config.num_samples)]
+        # gen_x = torch.stack(generated_x).squeeze(1)[:, :c.ndim_x]
+        # gen_x = gen_x.to('cpu')
+        # gen_x = gen_x.detach()
+        # y_clean = y_clean.repeat(config.num_samples,1)
         
-        fig_name = f"{loss_f}_prior" if prior else loss_f 
-        axes, distance = arm.viz_inverse(pos = y_clean, thetas = gen_x, save = True, show = False, fig_name=fig_name)
+        # fig_name = f"{loss_f}_prior" if prior else loss_f 
+        # axes, distance = arm.viz_inverse(pos = y_clean, thetas = gen_x, save = True, show = False, fig_name=fig_name)
+        
+        y_test = y_clean
+        generated_x = []
+        for _ in range(config.num_samples):
+            z = torch.randn(1, c.ndim_z).to(config.device) * config.y_noise_scale ** 0.5
+            pad_yz = torch.zeros(1, c.ndim_tot - c.ndim_y - c.ndim_z).to(config.device)
+            y_noisy = y_test.unsqueeze(0).to(config.device) #+ config.y_noise_scale * torch.randn(1, c.ndim_y).to(config.device)
+            y_aug = torch.cat([z, pad_yz, y_noisy], dim=1)
+            x_gen = model(y_aug, rev=True)[0]
+            generated_x.append(x_gen)
+
+        gen_x = torch.stack(generated_x).squeeze(1)[:, :c.ndim_x]
+        gen_x = gen_x.to('cpu').detach()
+        y_clean = y_clean.repeat(config.num_samples, 1)
+
+        fig_name = f"{loss_f}_prior" if prior else loss_f
+        axes, distance = arm.viz_inverse(pos=y_clean, thetas=gen_x, save=False, show=True, fig_name=fig_name)
+        
+        
+        
+        
         # csv_path = 'rmse_logs.csv'
 
         # if not os.path.exists(csv_path):
@@ -167,7 +188,7 @@ if __name__ == '__main__':
             
         
     elif dataset.lower() == 'cubic':
-        y_clean = torch.tensor(1.5**3, dtype=torch.float)
+        y_clean = torch.tensor(-2.5**3, dtype=torch.float)
         c = config.Cubic_Config()
         model = model.to(config.device)
 
@@ -186,14 +207,10 @@ if __name__ == '__main__':
         sns.set_theme(style="whitegrid", palette="muted")
         plt.figure(figsize=(10, 6))
 
-        sns.histplot(
-            gen_x, bins=55, kde=True, color="skyblue", linewidth=2,
-            stat="probability", alpha=1, multiple='dodge', hatch='\\\\',
-            label='No Prior' if not prior else 'Prior'
-        )
+        sns.histplot(gen_x, bins=55, kde=True, color="skyblue", linewidth=2,stat="probability", alpha=1, multiple='dodge', hatch='\\\\',label='No Prior' if not prior else 'Prior')
 
         # Add dotted line at y_clean
-        plt.axvline(x=1.5, color='red', linestyle='dotted', linewidth=2, label='y_clean')
+        plt.axvline(x=-2.5, color='red', linestyle='dotted', linewidth=2, label='y_clean')
 
         # Labeling and styling
         plt.xlabel("Value", fontsize=20, fontname='DejaVu Serif')
@@ -228,7 +245,7 @@ if __name__ == '__main__':
         # Gaussian noise
         y_gauss = x_true + np.random.randn()
 
-        # Exponential noise
+        # Laplacian noise
         y_lap = x_true + np.random.laplace(loc=0.0, scale=1.0)
 
         # Posterior for Gaussian noise
@@ -236,7 +253,7 @@ if __name__ == '__main__':
         unnorm_post_gauss = likelihood_gauss * prior_support.astype(float)
         posterior_gauss = unnorm_post_gauss / np.trapz(unnorm_post_gauss, x_grid)
 
-        # Posterior for Exponential noise
+        # Posterior for Laplacian noise
         lambda_ = 1.0
         likelihood_exp = np.where(x_grid <= y_lap, lambda_ * np.exp(-lambda_ * (y_lap - x_grid)), 0)
         unnorm_post_exp = likelihood_exp * prior_support.astype(float)

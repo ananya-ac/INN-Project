@@ -40,8 +40,10 @@ def MMD_multiscale(x, y, kind = None):
     
 
 def NLL(z, det_log_j):
-  #return  torch.log(z.new_tensor(2 * torch.pi)) * z.size(-1) + torch.mean(torch.sum((0.5 * z**2), dim=-1) - det_log_j)
-  return  torch.mean(torch.sum((0.5 * z**2), dim=-1) - det_log_j)
+    
+    return torch.mean(0.5/(c.y_noise_scale) * torch.sum((z**2), dim=-1) - det_log_j)
+
+  
 
 
 def uniform_prior_x_loss(x, a=-2.5, b=2.5, log_px = torch.log(torch.tensor(5)), lambda_ = 5.0, device = c.device):
@@ -72,5 +74,9 @@ def fit_huber(input, target):
 def uniform_prior_loss(x, low=-2.5, high=2.5):
     return torch.mean((torch.max(torch.tensor(0.0, device=c.device), x - high) + 
                       torch.max(torch.tensor(0.0, device=c.device), low - x)))
-
+    
+    
+def f_star_kl(t, clip_min=-10.0, clip_max=10.0):
+    t_clamped = torch.clamp(t, min=clip_min, max=clip_max)
+    return torch.exp(t_clamped - 1)
 

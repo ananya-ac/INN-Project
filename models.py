@@ -12,7 +12,9 @@ from loader import get_test
 from typing import Tuple
 import torch.utils.data as data
 from geomloss import SamplesLoss
-import numpy as np  
+import numpy as np
+from torch.nn.utils import spectral_norm
+  
 import pdb
 
 approx_wasserstein = SamplesLoss(p = 2, blur = 0.01)
@@ -114,20 +116,16 @@ def build_inn_model(dims_in):
 class CriticNet(nn.Module):
     def __init__(self, input_dim):
         super().__init__()
-        # Make the critic network deeper
         self.net = nn.Sequential(
-            nn.Linear(input_dim, 256),
+            spectral_norm(nn.Linear(input_dim, 512)),
             nn.ReLU(),
-            nn.Linear(256, 256),
+            spectral_norm(nn.Linear(512, 256)),
             nn.ReLU(),
-            nn.Linear(256, 128),
+            spectral_norm(nn.Linear(256, 128)),
             nn.ReLU(),
-            nn.Linear(128, 64),
-            nn.ReLU(),
-            nn.Linear(64, 1)
+            spectral_norm(nn.Linear(128, 1))
         )
         
-    
     def forward(self, x):
         return self.net(x).squeeze()
 
@@ -144,7 +142,7 @@ class INNModel(pl.LightningModule):
             self.c = config.Cubic_Config
         if dataset == 'ik_robotics':
             self.c = config.IK_Config
-        if dataset == 'GI':
+        if dataset == 'gi':
             self.c = config.GI_Config
         if dataset == 'toy_example':
             self.c = config.Toy_Config
@@ -207,93 +205,6 @@ class INNModel(pl.LightningModule):
 
         return sample
 
-    # def training_step(self, batch, batch_idx):
-        
-    #     x, y = batch
-        
-    #     if self.dataset.lower() == 'gi':
-    #         x = (x - self.x_mean)/self.x_std
-    #         y = (y - self.y_mean)/self.y_std
-        
-    #     if self.c.ndim_y == 1:
-    #         y = y.unsqueeze(1)
-    #     if self.c.ndim_x == 1:
-    #         x = x.unsqueeze(1)
-
-    #     y_clean = y.clone()
-        
-    #     if not (self.dataset.lower() == 'gi' or self.dataset.lower() == 'toy_example'):
-    #         y = y + config.y_noise_scale * torch.randn_like(y, dtype=torch.float, device=config.device)
-            
-        
-    #     x = torch.cat([x, config.zeros_noise_scale * torch.randn(config.batch_size, self.c.ndim_tot - self.c.ndim_x, device=config.device)], dim=1)
-    #     y = torch.cat([y, torch.sqrt(torch.tensor(config.y_noise_scale, device=config.device, dtype=torch.float32))  * torch.randn(config.batch_size, self.c.ndim_z, device=config.device)], dim=1)
-    #     #y = torch.cat([y, config.y_noise_scale * (2 * torch.rand(config.batch_size, self.c.ndim_z, device=config.device) - 1)], dim=1)
-
-    #     output_rev, _ = self.model(y, rev=True)
-    #     output, sum_log_j_f = self.model(x)
-        
-    #     y_act = y_clean[:, :self.c.ndim_y]
-    #     y_preds = output[:, :self.c.ndim_y]
-    #     z_preds = output[:, self.c.ndim_y:]
-    #     y_clean = torch.cat([y_clean, y[:, self.c.ndim_y:]], dim=1)
-        
-    #     if self.loss_f == 'NLL':
-    #         loss = 25 * fit_l2(y_preds,y_act) + NLL(z_preds, sum_log_j_f) + 5 * fit_l2(output_rev, x)
-            
-            
-        
-    #     if self.loss_f == 'MMDf' or self.loss_f == 'MMDa':
-    #         loss = 100 * MMD_multiscale(y_clean,output, kind='forward')
-    #         loss +=  3 * fit_l2(y_preds, y_act)
-            
-    #     if self.loss_f == 'wasserstein':
-    #         loss = fit_l2(y_preds, y_act)
-    #         self.log("train_loss_fit_l2", fit_l2(y_preds, y_act))
-    #         self.log("wasserstein", approx_wasserstein(y_clean, output))
-    #         loss = loss + approx_wasserstein(y, output)
-            
-        
-        
-    #     l_tot = loss
-        
-    #     loss_backward = 0
-        
-        
-    #     if self.loss_f == 'wasserstein':
-    #         #loss_backward += approx_wasserstein(x[:, :self.ndim_x], output_rev[:, :self.ndim_x])
-    #         loss_backward = loss_backward + approx_wasserstein(x, output_rev)
-            
-        
-    #     if self.loss_f == 'MMDa':
-    #         loss_backward = self.loss_factor * 500 * MMD_multiscale(x, output_rev)
-    #         #loss_backward = self.loss_factor * 500 * MMD_multiscale(x[:, :self.ndim_x], output_rev[:, :self.ndim_x])
-    #         loss_backward += fit_l2(output_rev, x)
-        
-    #     if self.prior:
-    #         if self.dataset == 'ik_robotics':
-    #             loss_backward += config.prior_scale * normal_prior_x_loss(x_gt=x[:, :self.c.ndim_x], x = output_rev[:, :self.c.ndim_x]) 
-    #             #loss_backward += config.prior_scale * uniform_prior_loss(output_rev[:, :self.c.ndim_x])
-    #         elif self.dataset == 'cubic' : loss_backward += 10 * uniform_prior_loss(output_rev[:, :self.c.ndim_x])
-            
-            
-    #         else:
-    #             output_scaled = output_rev * self.x_std + self.x_mean 
-    #             loss_backward += config.prior_scale * uniform_prior_loss(output_scaled[:, 0], 200.5, 236.5)
-    #             self.log("uniform_prior_loss_depth", uniform_prior_loss(output_scaled[:, 0], 200.5, 236.5))
-    #             loss_backward += config.prior_scale * uniform_prior_loss(output_scaled[:, 1], 1532, 1592)
-    #             self.log("uniform_prior_loss_speed", uniform_prior_loss(output_scaled[:, 1], 1532, 1592))
-                
-                
-            
-    #     l_tot += loss_backward
-    #     #self.loss_factor = min(1., 2. * 0.002**(1. - (float(self.i_epoch) / 3120)))
-    #     self.i_epoch += 1 
-
-    #     self.log("train_loss", l_tot)    
-            
-
-    #     return l_tot
     
     
     def training_step(self, batch, batch_idx):
@@ -348,8 +259,9 @@ class INNModel(pl.LightningModule):
             # === Flow update ===
             x_fake, _ = self.model(y, rev=True)
             t_fake = self.critic(x_fake)
+            t_fake = torch.clamp(t_fake, min=-10, max=10)  # ⬅️ REQUIRED
 
-            loss_flow = f_star_kl(t_fake).mean()
+            loss_flow = -f_star_kl(t_fake).mean()
             self.manual_backward(loss_flow)
             opt_flow.step()
             opt_flow.zero_grad()
@@ -454,15 +366,9 @@ class INNModel(pl.LightningModule):
         elif self.dataset.lower() == 'cubic':
             _, val_loader = cubic_equation_loaders(100000)
         
-        else:
-            _, val_loader, self.x_mean, self.x_std, self.y_mean, self.y_std = get_GI_loaders()
-            self.x_mean = self.x_mean.to(config.device)
-            self.x_std = self.x_std.to(config.device)
-            self.y_mean = self.y_mean.to(config.device)
-            self.y_std = self.y_std.to(config.device)    
-           
-    
-
+        elif self.dataset.lower() == 'gi':
+            _, val_loader, _, _, _, _ = get_GI_loaders()
+            
         return val_loader
 
     def configure_optimizers(self):
@@ -516,8 +422,13 @@ class INNModel(pl.LightningModule):
         #     train_loader = data.DataLoader(train_dataset, batch_size=256, shuffle=True)
     
 
-        else:
-            train_loader, _, _, _ ,_,_= get_GI_loaders()
+        elif self.dataset == 'gi':
+            train_loader,_, self.x_mean, self.x_std, self.y_mean, self.y_std = get_GI_loaders()
+            self.x_mean = self.x_mean.to(config.device)
+            self.x_std = self.x_std.to(config.device)
+            self.y_mean = self.y_mean.to(config.device)
+            self.y_std = self.y_std.to(config.device)
+
         
         return train_loader
 

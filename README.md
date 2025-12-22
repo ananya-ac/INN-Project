@@ -23,7 +23,7 @@ Runs experiments with NLL, KLD, and JSD objectives for both model configurations
 ## Citation
 
 ```bibtex
-@article{vina2024,
+@article{vina2025,
   title={VINA: Variational Invertible Neural Architectures},
   author={[Author Names]},
   journal={[Journal Name]},

@@ -16,14 +16,17 @@ conda activate inn_final
 
 ```bash
 ./gi.sh
+
 ```
+Runs experiments with NLL, KLD, and JSD objectives for both model configurations. 
+
+
 
 ### Acknowledgment
 The file robot_arm_2d.py is adapted from work by a-doering.
 Original implementation available at:
 https://github.com/a-doering/learning-inverse-kinematics.git
 
-Runs experiments with NLL, KLD, and JSD objectives for both model configurations. 
 
 ## Citation
 

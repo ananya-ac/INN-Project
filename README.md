@@ -18,6 +18,11 @@ conda activate inn_final
 ./gi.sh
 ```
 
+### Acknowledgment
+The file robot_arm_2d.py is adapted from work by a-doering.
+Original implementation available at:
+https://github.com/a-doering/learning-inverse-kinematics.git
+
 Runs experiments with NLL, KLD, and JSD objectives for both model configurations. 
 
 ## Citation
@@ -25,8 +30,7 @@ Runs experiments with NLL, KLD, and JSD objectives for both model configurations
 ```bibtex
 @article{vina2025,
   title={VINA: Variational Invertible Neural Architectures},
-  author={[Author Names]},
-  journal={[Journal Name]},
+  author={[Shubhanshu Shekhar, Mohammad Javad Khojasteh, Ananya Acharya, Tony Tohme, Kamal Youcef-Toumi]},
   year={2025}
 }
 ```

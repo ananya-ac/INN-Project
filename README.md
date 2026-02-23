@@ -25,7 +25,11 @@ Runs experiments with NLL, KLD, and JSD objectives for both model configurations
 ### Acknowledgment
 The file robot_arm_2d.py is adapted from work by a-doering.
 Original implementation available at:
-https://github.com/a-doering/learning-inverse-kinematics.git
+https://github.com/a-doering/learning-inverse-kinematics
+
+The implementation of f-gan training loops is adapted from work by minlee077
+Original implementatio available at:
+https://github.com/minlee077/f-GAN-pytorch
 
 
 ## Citation
